@@ -15,7 +15,7 @@
 
 DOCUMENTATION = '''
 ---
-module: ec2_tag_enumeration
+module: ec2_enumerate_tag
 short_description: Enumerate instances with ec2 tags
 description:
     - Filter instances with certain tags and enumerate them
@@ -25,7 +25,7 @@ options:
     description:
       - The target tag, e.g. Name
     required: true
-    aliases: []   
+    aliases: []
   pattern:
     description:
       - The target pattern, e.g. myhost[01:99]
@@ -102,10 +102,21 @@ def fresh_names(pattern, taken, no_requested):
         suffix = str(current_id + i)
         while len(suffix) < len(range_start_str):
             suffix = "0" + suffix
-            
+
         names.append(hostname + suffix)
-    
+
     return names
+
+def format_return(instances):
+    ret = []
+    for item in instances:
+        instance = item["instance"]
+        ret.append({"id" : instance.id,
+                    "public_dns" : instance.public_dns_name,
+                    "public_ip" : instance.ip_address,
+                    "value" : item['val']
+                    })
+    return ret
 
 def main():
     argument_spec = ec2_argument_spec()
@@ -141,35 +152,40 @@ def main():
     except PatternError as e:
         module.fail_json(msg=e.message)
 
-    valid_names = []
-    invalid_names = []
+    valid_instances = []
+    invalid_instances = []
 
     for instance in instances:
         if tag in instance.tags:
             current_val = instance.tags[tag]
-            if check_pattern(pattern, current_val, valid_names):
-                valid_names.append(current_val)
+            if check_pattern(pattern, current_val, valid_instances):
+                valid_instances.append({"instance" : instance,
+                                        "val" : current_val})
             else:
-                invalid_names.append((instance, current_val))
+                invalid_instances.append({"instance" : instance,
+                                          "val" : current_val})
         else:
-            invalid_names.append((instance, None))
-            
+            invalid_instances.append({"instance" : instance,
+                                      "val" : None})
 
-    invalid_names_len = len(invalid_names)
+    invalid_instances_len = len(invalid_instances)
     tag_changes = []
-    if invalid_names_len > 0:
-        new_names = fresh_names(pattern, valid_names, invalid_names_len)
-        for idx, (bad_instance, old_name) in enumerate(invalid_names, start=0):
+    for i in enumerate(invalid_instances, start=0):
+        print i
+    if invalid_instances_len > 0:
+        new_names = fresh_names(pattern, valid_instances, invalid_instances_len)
+        for idx, item in enumerate(invalid_instances, start=0):
             new_name = new_names[idx]
-            instance.add_tag(tag, new_name)
-            tag_changes.append({"id" : instance.id,
+            bad_instance = item["instance"]
+            bad_instance.add_tag(tag, new_name)
+            tag_changes.append({"id" : bad_instance.id,
                                 "tag" : tag,
                                 "before" : old_name,
                                 "after" : new_name
                                 })
-        module.exit_json(changed=True, tag_changes=tag_changes)
+        module.exit_json(changed=True, tag_changes=tag_changes, current=new_names.append(valid_instances))
     else:
-        module.exit_json(changed=False)
+        module.exit_json(changed=False, current=format_return(valid_instances))
 
 
 
